@@ -1,0 +1,57 @@
+name: database_sessions frontend
+
+on:
+  push:
+    paths: ['database_sessions/**', '.github/workflows/database-sessions-frontend.yml']
+  pull_request:
+    paths: ['database_sessions/**', '.github/workflows/database-sessions-frontend.yml']
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: database_sessions
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: database_sessions/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
+      - name: No source maps in the build (SR-4)
+        run: test -z "$(find dist -name '*.map')"
+
+  # Playwright against the real backend + SQL Server (PRD §10.1). Needs a reachable backend with a
+  # bootstrap admin; enable by setting the repository variable E2E_ENABLED=true and the secrets below.
+  e2e:
+    if: vars.E2E_ENABLED == 'true'
+    needs: checks
+    runs-on: ubuntu-latest
+    env:
+      E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: database_sessions/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Start the backend (http://localhost:5154) here, e.g. from its repo with a SQL Server service container.
+      - run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: database_sessions/playwright-report
